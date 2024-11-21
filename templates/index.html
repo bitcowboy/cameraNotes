@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Note</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            margin: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        video {
+            width: 100%;
+            max-width: 320px; /* Smaller preview size */
+            height: auto;
+        }
+        canvas {
+            display: none; /* Hide canvas initially */
+            width: 100%; /* Scale to fit the screen */
+            max-width: 320px; /* Match the video preview size */
+            height: auto;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Camera Note</h1>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+    <button id="snap">Capture</button>
+    <button id="upload" style="display: none;">Send</button>
+    <div id="error-message" style="color: red;"></div>
+    <div id="result" style="margin-top: 20px; font-size: 18px; color: green;"></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const errorMessage = document.getElementById('error-message');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const snapButton = document.getElementById('snap');
+        const uploadButton = document.getElementById('upload');
+        let stream;
+
+        function startCamera() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                    .then(mediaStream => {
+                        stream = mediaStream;
+                        video.srcObject = stream;
+                        video.onloadedmetadata = () => {
+                            // Set canvas dimensions to a higher resolution
+                            canvas.width = video.videoWidth * 2; // Double the width
+                            canvas.height = video.videoHeight * 2; // Double the height
+                        };
+                    })
+                    .catch(err => {
+                        console.error("Error accessing the camera: ", err);
+                        errorMessage.textContent = "Please allow camera access to use this feature. Error: " + err.message;
+                    });
+            } else {
+                errorMessage.textContent = "Camera access is not supported by your browser.";
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+        }
+
+        // Initialize the camera with the back camera
+        startCamera();
+
+        // Capture the photo
+        snapButton.addEventListener('click', () => {
+            if (snapButton.textContent === 'Capture') {
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.style.display = 'block'; // Show the canvas with the captured image
+                video.style.display = 'none'; // Hide the video
+                stopCamera(); // Stop the camera
+                snapButton.textContent = 'Retake'; // Change button text
+                uploadButton.style.display = 'block'; // Show the upload button
+            } else {
+                canvas.style.display = 'none'; // Hide the canvas
+                video.style.display = 'block'; // Show the video
+                startCamera(); // Restart the camera
+                snapButton.textContent = 'Capture'; // Change button text back
+                uploadButton.style.display = 'none'; // Hide the upload button
+            }
+        });
+
+        // Upload the photo
+        uploadButton.addEventListener('click', () => {
+            canvas.toBlob(blob => {
+                const formData = new FormData();
+                formData.append('image', blob, `capture-${Date.now()}.jpg`); // Use a timestamp for uniqueness
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Success:', data);
+                    // Display server analysis result
+                    const resultElement = document.getElementById('result');
+                    resultElement.textContent = `${data.result}`; // Assuming 'result' is the key in the response
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                    alert('Failed to upload image.');
+                });
+            }, 'image/jpeg'); // Specify JPEG format
+        });
+    </script>
+</body>
+</html>

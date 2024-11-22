@@ -38,6 +38,8 @@
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
     <button id="snap">Capture</button>
+    <button id="uploadFromRollButton">Upload from Camera Roll</button>
+    <input type="file" id="uploadFromRoll" accept="image/*" style="display: none;">
     <button id="upload" style="display: none;">Send</button>
     <div id="error-message" style="color: red;"></div>
     <div id="result" style="margin-top: 20px; font-size: 18px; color: green;"></div>
@@ -82,7 +84,36 @@
         // Initialize the camera with the back camera
         startCamera();
 
-        // Capture the photo
+        // Add event listener for the file input button
+        const uploadFromRollButton = document.getElementById('uploadFromRollButton');
+        uploadFromRollButton.addEventListener('click', () => {
+            uploadFromRoll.click(); // Trigger the file input click
+        });
+
+        // Add event listener for the file input
+        const uploadFromRoll = document.getElementById('uploadFromRoll');
+        uploadFromRoll.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        canvas.style.display = 'block'; // Show the canvas with the uploaded image
+                        video.style.display = 'none'; // Hide the video
+                        snapButton.textContent = 'Retake'; // Change button text
+                        uploadButton.style.display = 'block'; // Show the upload button
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Modify the snap button to toggle file input visibility
         snapButton.addEventListener('click', () => {
             if (snapButton.textContent === 'Capture') {
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -97,6 +128,7 @@
                 startCamera(); // Restart the camera
                 snapButton.textContent = 'Capture'; // Change button text back
                 uploadButton.style.display = 'none'; // Hide the upload button
+                uploadFromRoll.style.display = 'block'; // Show the file input
             }
         });
 

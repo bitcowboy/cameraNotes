@@ -4,7 +4,6 @@ import uuid
 import base64
 from openai import OpenAI
 import sqlite3
-from datetime import datetime
 
 system_prompt = """
 你是一个智能助手。你会分析用户拍的照片，并给出分析其中的主题。根据不同的主题，调用相应的工具，帮助用户备忘、记录信息或解决问题。
@@ -55,28 +54,30 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             food_name TEXT NOT NULL,
             calories INTEGER NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+            image_path TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
-def record_calories(food_name: str, calories: int):
+def record_calories(food_name: str, calories: int, image_filename: str):
     conn = sqlite3.connect('calories.db')
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO calories (food_name, calories) VALUES (?, ?)
-    ''', (food_name, calories))
-    conn.commit()
+        INSERT INTO calories (food_name, calories, image_path) VALUES (?, ?, ?)
+    ''', (food_name, calories, image_filename))
+    conn.commit()   
     conn.close()
-    print(f"记录热量: {food_name} - {calories} 千卡")
+    print(f"记录热量: {food_name} - {calories} 千卡, Image Path: {image_filename}")
 
 # Function to encode the image
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
-def analyze_image(image_path):
+def analyze_image(unique_filename):
+    image_path = os.path.join('static', unique_filename)
     base64_image = encode_image(image_path)
 
     response = client.chat.completions.create(
@@ -97,7 +98,7 @@ def analyze_image(image_path):
                 # Parse the JSON string in the arguments
                 import json
                 params = json.loads(tool_call.function.arguments)
-                record_calories(params['food_name'], params['calories'])
+                record_calories(params['food_name'], params['calories'], unique_filename)
 
     return response.choices[0].message.content
 
@@ -116,14 +117,23 @@ def upload():
 
     # Generate a unique filename with the correct extension
     unique_filename = f"{uuid.uuid4()}.jpg"
-    file_path = os.path.join('uploads', unique_filename)
+    file_path = os.path.join('static', unique_filename)
     file.save(file_path)
 
-    analysis = analyze_image(file_path)
-    return jsonify({'success': True, 'file_path': file_path, 'result': analysis})
+    analysis = analyze_image(unique_filename)
+    return jsonify({'success': True, 'result': analysis})
+
+@app.route('/list')
+def list_foods():
+    conn = sqlite3.connect('calories.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT food_name, calories, image_path FROM calories')
+    foods = cursor.fetchall()
+    conn.close()
+    return render_template('list.html', foods=foods)
 
 if __name__ == '__main__':
-    if not os.path.exists('uploads'):
-        os.makedirs('uploads')
+    if not os.path.exists('static'):
+        os.makedirs('static')
     init_db()
     app.run(host='0.0.0.0', debug=True, ssl_context='adhoc')

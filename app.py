@@ -4,6 +4,8 @@ import uuid
 import base64
 from openai import OpenAI
 import sqlite3
+from collections import defaultdict
+from datetime import datetime
 
 system_prompt = """
 你是一个智能助手。你会分析用户拍的照片，并给出分析其中的主题。根据不同的主题，调用相应的工具，帮助用户备忘、记录信息或解决问题。
@@ -131,6 +133,22 @@ def list_foods():
     foods = cursor.fetchall()
     conn.close()
     return render_template('list.html', foods=foods)
+
+@app.route('/calendar')
+def calendar():
+    conn = sqlite3.connect('calories.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT calories, timestamp FROM calories')
+    records = cursor.fetchall()
+    conn.close()
+
+    # Calculate total calories per day
+    daily_calories = defaultdict(int)
+    for calories, timestamp in records:
+        date = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').date()
+        daily_calories[date] += calories
+
+    return render_template('calendar.html', daily_calories=daily_calories)
 
 if __name__ == '__main__':
     if not os.path.exists('static'):

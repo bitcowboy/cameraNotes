@@ -1,11 +1,14 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 import os
 import uuid
 import base64
+import json
 from openai import OpenAI
 import sqlite3
 from collections import defaultdict
 from datetime import datetime
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from authlib.integrations.flask_client import OAuth
 
 system_prompt = """
 你是一个智能助手。你会分析用户拍的照片，并给出分析其中的主题。根据不同的主题，调用相应的工具，帮助用户备忘、记录信息或解决问题。
@@ -16,6 +19,22 @@ system_prompt = """
 
 当你检测到主题时直接调用工具，不需要用户确认。
 使用简体中文回答。
+"""
+
+system_prompt_2 = """
+  You are a very useful assistant. Help me with determining the caloric content of products
+"""
+
+user_prompt = """
+  The photo shows food products for a meal. Determine approximately which products are shown in the photo and return them ONLY as a json list, 
+  where each list element should contain:
+    * "title" - the name of the product, 
+    * "weight" - weight in grams, 
+    * "kilocalories_per100g" - how many calories are contained in this product in 100 grams, 
+    * "proteins_per100g" - the amount of proteins of this product per 100 grams, 
+    * "fats_per100g" - the amount of fat per 100 grams of this product, 
+    * "carbohydrates_per100g" - the amount of carbohydrates per 100 grams of this product, 
+    * "fiber_per100g" - the amount of fiber per 100 grams of this product, 
 """
 
 tools = [
@@ -46,6 +65,67 @@ tools = [
 client = OpenAI()
 
 app = Flask(__name__)
+app.secret_key = 'f540ce17793920d21c2c49b0bb9c51af'
+
+# Initialize Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+with open('oauth_client.json', 'r') as file:
+    google_oauth_client = json.load(file)
+
+# Initialize OAuth
+oauth = OAuth(app)
+google = oauth.register(
+    name="google",
+    client_id=google_oauth_client['client_id'],
+    client_secret=google_oauth_client['client_secret'],
+    access_token_url= "https://oauth2.googleapis.com/token",
+    authorize_url= "https://accounts.google.com/o/oauth2/v2/auth",
+    api_base_url= "https://www.googleapis.com/oauth2/v3/",
+    client_kwargs= {"scope": "openid email profile"},
+    userinfo_endpoint = 'https://openidconnect.googleapis.com/v1/userinfo',
+    server_metadata_url= 'https://accounts.google.com/.well-known/openid-configuration'
+)
+
+# User class for Flask-Login
+class User(UserMixin):
+    def __init__(self, id, name, email):
+        self.id = id
+        self.name = name
+        self.email = email
+
+@login_manager.user_loader
+def load_user(user_id):
+    # Implement user loading logic here
+    return User(user_id, None, None)
+
+@app.route('/login')
+def login():
+    redirect_uri = url_for('authorize', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route('/authorize')
+def authorize():
+    token = google.authorize_access_token()
+    resp = google.get('userinfo')
+    user_info = resp.json()
+    print(user_info)
+    user = User(user_info['sub'], user_info['name'], user_info['email'])
+    login_user(user)
+    return redirect('/')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect('/')
+
+@app.route('/')
+@login_required
+def index():
+    return render_template('index.html', user=current_user)
 
 # Initialize the SQLite database
 def init_db():
@@ -85,7 +165,8 @@ def analyze_image(unique_filename):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": system_prompt_2},
+            {"role": "user", "content": user_prompt},
             {"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}]},
         ],
         tools=tools,
@@ -103,10 +184,6 @@ def analyze_image(unique_filename):
                 record_calories(params['food_name'], params['calories'], unique_filename)
 
     return response.choices[0].message.content
-
-@app.route('/')
-def index():
-    return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
 def upload():
